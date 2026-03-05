@@ -1,0 +1,129 @@
+{
+ "actions": [],
+ "autoname": "format:RSD-DU-{######}",
+ "creation": "2026-02-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "gtin",
+  "serial_number",
+  "batch_number",
+  "expiry_date",
+  "section_erpnext_reference",
+  "item_code",
+  "batch_no",
+  "column_break_erpnext",
+  "status",
+  "current_holder_gln",
+  "section_tracking",
+  "last_notification_type",
+  "last_notification_at",
+  "datamatrix_raw"
+ ],
+ "fields": [
+  {
+   "fieldname": "gtin",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "GTIN",
+   "reqd": 1
+  },
+  {
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Serial Number",
+   "reqd": 1
+  },
+  {
+   "fieldname": "batch_number",
+   "fieldtype": "Data",
+   "label": "Batch Number"
+  },
+  {
+   "fieldname": "expiry_date",
+   "fieldtype": "Date",
+   "label": "Expiry Date"
+  },
+  {
+   "fieldname": "section_erpnext_reference",
+   "fieldtype": "Section Break",
+   "label": "ERPNext Reference"
+  },
+  {
+   "fieldname": "item_code",
+   "fieldtype": "Link",
+   "label": "Item Code",
+   "options": "Item"
+  },
+  {
+   "fieldname": "batch_no",
+   "fieldtype": "Link",
+   "label": "Batch",
+   "options": "Batch"
+  },
+  {
+   "fieldname": "column_break_erpnext",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Registered",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "RSD Status",
+   "options": "Registered\nSupplied\nDispatched\nIn Transit\nAccepted\nConsumed\nSold\nDeactivated\nExported\nReturned"
+  },
+  {
+   "fieldname": "current_holder_gln",
+   "fieldtype": "Data",
+   "label": "Current Holder GLN"
+  },
+  {
+   "fieldname": "section_tracking",
+   "fieldtype": "Section Break",
+   "label": "Tracking"
+  },
+  {
+   "fieldname": "last_notification_type",
+   "fieldtype": "Data",
+   "label": "Last Notification Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_notification_at",
+   "fieldtype": "Datetime",
+   "label": "Last Notification At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "datamatrix_raw",
+   "fieldtype": "Data",
+   "label": "Raw DataMatrix",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-02-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SFDA RSD",
+ "name": "RSD Drug Unit",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Stock Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

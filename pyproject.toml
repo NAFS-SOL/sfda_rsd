@@ -1,0 +1,55 @@
+[project]
+name = "sfda_rsd"
+authors = [
+    { name = "Your Company", email = "info@yourcompany.com"}
+]
+description = "SFDA RSD Drug Track & Trace (DTTS) Integration for Frappe/ERPNext"
+requires-python = ">=3.10"
+readme = "README.md"
+dynamic = ["version"]
+dependencies = [
+    "zeep>=4.2.1",
+    "lxml>=4.9.0",
+]
+
+[build-system]
+requires = ["flit_core >=3.4,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.bench.dev-dependencies]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "F",
+    "E",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "RUF",
+]
+ignore = [
+    "B017",
+    "B018",
+    "B023",
+    "B904",
+    "E101",
+    "E402",
+    "E501",
+    "E741",
+    "F401",
+    "F403",
+    "F405",
+    "F722",
+    "W191",
+]
+typing-modules = ["frappe.types.DF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+docstring-code-format = true

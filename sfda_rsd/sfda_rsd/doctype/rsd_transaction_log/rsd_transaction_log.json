@@ -1,0 +1,90 @@
+{
+ "actions": [],
+ "autoname": "format:RSD-LOG-{######}",
+ "creation": "2026-02-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "service_name",
+  "operation",
+  "status",
+  "timestamp",
+  "stakeholder_gln",
+  "error_message",
+  "parameters",
+  "request_xml",
+  "response_xml"
+ ],
+ "fields": [
+  {
+   "fieldname": "service_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Service Name"
+  },
+  {
+   "fieldname": "operation",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Operation"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Success\nError"
+  },
+  {
+   "fieldname": "timestamp",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Timestamp"
+  },
+  {
+   "fieldname": "stakeholder_gln",
+   "fieldtype": "Data",
+   "label": "Stakeholder GLN"
+  },
+  {
+   "fieldname": "error_message",
+   "fieldtype": "Small Text",
+   "label": "Error Message"
+  },
+  {
+   "fieldname": "parameters",
+   "fieldtype": "Code",
+   "label": "Parameters",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "request_xml",
+   "fieldtype": "Code",
+   "label": "Request XML",
+   "options": "XML"
+  },
+  {
+   "fieldname": "response_xml",
+   "fieldtype": "Code",
+   "label": "Response XML",
+   "options": "XML"
+  }
+ ],
+ "links": [],
+ "modified": "2026-02-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SFDA RSD",
+ "name": "RSD Transaction Log",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "read": 1,
+   "role": "System Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 0
+}

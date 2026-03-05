@@ -1,0 +1,139 @@
+{
+ "actions": [],
+ "creation": "2026-02-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "environment",
+  "credentials_section",
+  "username",
+  "password",
+  "column_break_credentials",
+  "stakeholder_gln",
+  "establishment_gln",
+  "pharmacy_settings_section",
+  "default_tracking_mode",
+  "pharmacy_sale_togln",
+  "advanced_settings_section",
+  "max_retries",
+  "timeout_seconds",
+  "log_xml"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "default": "Test",
+   "fieldname": "environment",
+   "fieldtype": "Select",
+   "label": "Environment",
+   "options": "Test\nProduction",
+   "description": "Test: tandttest.sfda.gov.sa | Production: rsd.sfda.gov.sa"
+  },
+  {
+   "fieldname": "credentials_section",
+   "fieldtype": "Section Break",
+   "label": "Credentials"
+  },
+  {
+   "fieldname": "username",
+   "fieldtype": "Data",
+   "label": "DTTS Username",
+   "reqd": 1
+  },
+  {
+   "fieldname": "password",
+   "fieldtype": "Password",
+   "label": "DTTS Password",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_credentials",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stakeholder_gln",
+   "fieldtype": "Data",
+   "label": "Stakeholder GLN",
+   "reqd": 1,
+   "description": "Your 13-digit Global Location Number from SFDA"
+  },
+  {
+   "fieldname": "establishment_gln",
+   "fieldtype": "Data",
+   "label": "Establishment GLN",
+   "description": "Parent establishment GLN (if applicable)"
+  },
+  {
+   "fieldname": "pharmacy_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Pharmacy Settings"
+  },
+  {
+   "default": "Auto",
+   "fieldname": "default_tracking_mode",
+   "fieldtype": "Select",
+   "label": "Default Tracking Mode",
+   "options": "Auto\nSerial Number\nBatch Number",
+   "description": "Auto: use serial number if available, fallback to batch number"
+  },
+  {
+   "default": "0000000000000",
+   "fieldname": "pharmacy_sale_togln",
+   "fieldtype": "Data",
+   "label": "Pharmacy Sale TOGLN",
+   "description": "GLN for pharmacy sales. Use 0000000000000 for direct patient sales."
+  },
+  {
+   "fieldname": "advanced_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Advanced Settings"
+  },
+  {
+   "default": "3",
+   "fieldname": "max_retries",
+   "fieldtype": "Int",
+   "label": "Max Retries"
+  },
+  {
+   "default": "60",
+   "fieldname": "timeout_seconds",
+   "fieldtype": "Int",
+   "label": "Timeout (seconds)"
+  },
+  {
+   "default": "1",
+   "fieldname": "log_xml",
+   "fieldtype": "Check",
+   "label": "Log Raw XML"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-03-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "SFDA RSD",
+ "name": "RSD Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}
