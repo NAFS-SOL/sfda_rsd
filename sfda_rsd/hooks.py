@@ -9,6 +9,9 @@ required_apps = ["erpnext"]
 
 after_migrate = ["sfda_rsd.setup.after_migrate"]
 
+# Client scripts for RSD button on Purchase Receipt / Sales Invoice
+app_include_js = "/assets/sfda_rsd/js/rsd_button.js"
+
 # Document Events
 # ---------------
 # Pharmacy-focused doc events:
@@ -23,15 +26,19 @@ after_migrate = ["sfda_rsd.setup.after_migrate"]
 doc_events = {
 	"Stock Entry": {
 		"on_submit": "sfda_rsd.sfda_rsd.api.rsd_api.on_stock_entry_submit",
+		"on_cancel": "sfda_rsd.sfda_rsd.api.rsd_api.on_stock_entry_cancel",
 	},
 	"Purchase Receipt": {
 		"on_submit": "sfda_rsd.sfda_rsd.api.rsd_api.on_purchase_receipt_submit",
+		"on_cancel": "sfda_rsd.sfda_rsd.api.rsd_api.on_purchase_receipt_cancel",
 	},
 	"Sales Invoice": {
 		"on_submit": "sfda_rsd.sfda_rsd.api.rsd_api.on_sales_invoice_submit",
+		"on_cancel": "sfda_rsd.sfda_rsd.api.rsd_api.on_sales_invoice_cancel",
 	},
 	"Delivery Note": {
 		"on_submit": "sfda_rsd.sfda_rsd.api.rsd_api.on_delivery_note_submit",
+		"on_cancel": "sfda_rsd.sfda_rsd.api.rsd_api.on_delivery_note_cancel",
 	},
 }
 

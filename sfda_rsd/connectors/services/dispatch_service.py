@@ -7,7 +7,7 @@ Service URLs (per DTTS-ISD.DISPATCH-1.0.2):
   DispatchCancel:       {base}/ws/DispatchCancelService/DispatchCancelService?wsdl
   DispatchCancelBatch:  {base}/ws/DispatchCancelBatchService/DispatchCancelBatchService?wsdl
 """
-from sfda_rsd.sfda_rsd.connectors.rsd_connector import RSDConnector
+from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
 def dispatch_product(gtin, serial_number, receiver_gln, batch_number=None, expiry_date=None):
@@ -63,7 +63,7 @@ def dispatch_products_bulk(products, receiver_gln):
 def dispatch_by_batch(gtin, batch_number, receiver_gln, quantity, expiry_date=None):
 	"""Dispatch products by batch number."""
 	connector = RSDConnector()
-	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": quantity}
+	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": int(quantity)}
 	if expiry_date:
 		product["XD"] = expiry_date
 
@@ -93,7 +93,7 @@ def dispatch_cancel(gtin, serial_number, receiver_gln, batch_number=None, expiry
 def dispatch_cancel_by_batch(gtin, batch_number, receiver_gln, quantity, expiry_date=None):
 	"""Cancel a dispatch by batch number."""
 	connector = RSDConnector()
-	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": quantity}
+	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": int(quantity)}
 	if expiry_date:
 		product["XD"] = expiry_date
 

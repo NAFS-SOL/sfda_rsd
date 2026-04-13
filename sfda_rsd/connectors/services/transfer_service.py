@@ -7,7 +7,7 @@ Service URLs (per DTTS-ISD.TRANSFER-1.0.2):
   TransferCancel:       {base}/ws/TransferCancelService/TransferCancelService?wsdl
   TransferCancelBatch:  {base}/ws/TransferCancelBatchService/TransferCancelBatchService?wsdl
 """
-from sfda_rsd.sfda_rsd.connectors.rsd_connector import RSDConnector
+from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
 def transfer_product(gtin, serial_number, receiver_gln, batch_number=None, expiry_date=None):
@@ -37,7 +37,7 @@ def transfer_product(gtin, serial_number, receiver_gln, batch_number=None, expir
 def transfer_by_batch(gtin, batch_number, receiver_gln, quantity, expiry_date=None):
 	"""Transfer products by batch number."""
 	connector = RSDConnector()
-	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": quantity}
+	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": int(quantity)}
 	if expiry_date:
 		product["XD"] = expiry_date
 
@@ -67,7 +67,7 @@ def transfer_cancel(gtin, serial_number, receiver_gln, batch_number=None, expiry
 def transfer_cancel_by_batch(gtin, batch_number, receiver_gln, quantity, expiry_date=None):
 	"""Cancel a transfer by batch number."""
 	connector = RSDConnector()
-	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": quantity}
+	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": int(quantity)}
 	if expiry_date:
 		product["XD"] = expiry_date
 

@@ -10,6 +10,8 @@ from zeep.plugins import HistoryPlugin
 from requests import Session
 import traceback
 
+from sfda_rsd.connectors.error_codes import get_error_description
+
 
 # Response codes that indicate success per SFDA DTTS documentation
 SFDA_SUCCESS_CODES = {"00000", "10201"}
@@ -66,6 +68,7 @@ class RSDConnector:
 			wsdl_url = self.settings.get_wsdl_url(service_name)
 
 			session = Session()
+			session.auth = (self.username, self.password)
 			session.verify = True
 			session.timeout = self.timeout
 
@@ -79,13 +82,36 @@ class RSDConnector:
 
 			wsse = UsernameToken(self.username, self.password, use_digest=False)
 
+			# Fetch WSDL with explicit auth — some SFDA endpoints reject
+			# standard HTTP Basic Auth but accept credentials in the URL session
+			import requests
+			from requests.auth import HTTPBasicAuth
+			try:
+				wsdl_response = requests.get(
+					wsdl_url,
+					auth=HTTPBasicAuth(self.username, self.password),
+					timeout=self.timeout,
+					verify=True,
+				)
+				wsdl_response.raise_for_status()
+			except requests.exceptions.HTTPError:
+				# Fallback: try without auth (some services may be open)
+				wsdl_response = requests.get(wsdl_url, timeout=self.timeout, verify=True)
+				wsdl_response.raise_for_status()
+
+			# Parse WSDL from downloaded content instead of URL
+			from io import BytesIO
 			client = Client(
-				wsdl=wsdl_url,
+				wsdl=BytesIO(wsdl_response.content),
 				wsse=wsse,
 				transport=transport,
 				settings=settings,
 				plugins=[self.history],
 			)
+			# Set the WSDL URL as the service address (zeep needs this for actual SOAP calls)
+			base_url = self.settings.get_base_url()
+			service_url = f"{base_url}/ws/{service_name}/{service_name}"
+			client.service._binding_options["address"] = service_url
 
 			self._clients[service_name] = client
 
@@ -112,14 +138,28 @@ class RSDConnector:
 		error_message = ""
 
 		try:
-			operation = getattr(client.service, operation_name)
+			# Try the requested operation name first; if not found,
+			# auto-discover the first available operation in the WSDL
+			# (most SFDA services expose exactly one operation).
+			if hasattr(client.service, operation_name):
+				operation = getattr(client.service, operation_name)
+			else:
+				available_ops = list(client.service._binding._operations.keys())
+				if available_ops:
+					operation = getattr(client.service, available_ops[0])
+					frappe.logger().info(
+						f"RSD: Operation '{operation_name}' not found in {service_name}. "
+						f"Using '{available_ops[0]}' instead."
+					)
+				else:
+					frappe.throw(f"No operations found in WSDL for {service_name}")
 			response = operation(**params)
 
 			request_xml = self._serialize_xml(self.history.last_sent)
 			response_xml = self._serialize_xml(self.history.last_received)
 
-			# Parse response codes from SFDA response
-			rc_results = self._parse_response_codes(response)
+			# Parse response codes from raw XML (reliable for all services)
+			rc_results = self._parse_response_codes_from_xml(response_xml)
 			if rc_results.get("has_errors"):
 				status = "Error"
 				error_message = rc_results.get("error_summary", "Some products failed")
@@ -215,17 +255,27 @@ class RSDConnector:
 
 			errors = []
 			for prod in products:
-				gtin = getattr(prod, "GTIN", "") or ""
-				sn = getattr(prod, "SN", "") or ""
-				bn = getattr(prod, "BN", "") or ""
-				rc = str(getattr(prod, "RC", ""))
+				gtin = str(getattr(prod, "GTIN", "") or "")
+				sn = str(getattr(prod, "SN", "") or "")
+				bn = str(getattr(prod, "BN", "") or "")
+				# RC can be nested or accessed via dict — try multiple ways
+				rc = getattr(prod, "RC", None)
+				if rc is None and isinstance(prod, dict):
+					rc = prod.get("RC")
+				if rc is None and hasattr(prod, "__dict__"):
+					# Try accessing as dict keys for zeep objects
+					try:
+						rc = prod["RC"]
+					except (KeyError, TypeError):
+						pass
+				rc = str(rc) if rc is not None else ""
 
 				if rc in SFDA_SUCCESS_CODES:
 					result["success_products"].append({"GTIN": gtin, "SN": sn, "BN": bn})
 				else:
 					result["has_errors"] = True
-					errors.append(f"GTIN={gtin} SN={sn} RC={rc}")
-					result["failed_products"].append({"GTIN": gtin, "SN": sn, "RC": rc})
+					errors.append(f"GTIN={gtin} BN={bn} SN={sn} RC={rc}")
+					result["failed_products"].append({"GTIN": gtin, "SN": sn, "BN": bn, "RC": rc})
 
 			if errors:
 				result["error_summary"] = "; ".join(errors[:5])
@@ -233,6 +283,40 @@ class RSDConnector:
 		except Exception as e:
 			frappe.log_error(f"Failed to parse RSD response codes: {e}")
 
+		return result
+
+	def _parse_response_codes_from_xml(self, response_xml):
+		"""Fallback: parse RC codes directly from response XML string.
+
+		Used when zeep's object model can't access RC attributes (batch services).
+		"""
+		result = {
+			"has_errors": False,
+			"success_products": [],
+			"failed_products": [],
+			"error_summary": "",
+		}
+		try:
+			root = etree.fromstring(response_xml.encode("utf-8") if isinstance(response_xml, str) else response_xml)
+			products = root.findall(".//{*}PRODUCT")
+			errors = []
+			for prod in products:
+				gtin = (prod.findtext("{*}GTIN") or prod.findtext("GTIN") or "").strip()
+				sn = (prod.findtext("{*}SN") or prod.findtext("SN") or "").strip()
+				bn = (prod.findtext("{*}BN") or prod.findtext("BN") or "").strip()
+				rc = (prod.findtext("{*}RC") or prod.findtext("RC") or "").strip()
+
+				if rc in SFDA_SUCCESS_CODES:
+					result["success_products"].append({"GTIN": gtin, "SN": sn, "BN": bn})
+				else:
+					result["has_errors"] = True
+					desc = get_error_description(rc)
+					errors.append(f"GTIN={gtin} BN={bn} SN={sn} RC={rc}: {desc}")
+					result["failed_products"].append({"GTIN": gtin, "SN": sn, "BN": bn, "RC": rc, "description": desc})
+			if errors:
+				result["error_summary"] = "; ".join(errors[:5])
+		except Exception as e:
+			frappe.log_error(f"Failed to parse RSD response XML: {e}")
 		return result
 
 	def _update_drug_units(self, service_name, success_products):
@@ -345,9 +429,39 @@ def retry_failed_notifications():
 			)
 			params = frappe.parse_json(entry.parameters)
 			connector.call_service(entry.service_name, entry.operation, params)
-			frappe.db.set_value(
-				"RSD Notification Queue", entry.name, "status", "Completed"
+
+			# Check the transaction log to see if SFDA returned errors
+			latest_log = frappe.get_all(
+				"RSD Transaction Log",
+				filters={"service_name": entry.service_name},
+				fields=["status", "error_message"],
+				order_by="creation desc",
+				limit=1,
 			)
+			if latest_log and latest_log[0].status == "Error":
+				retry_count = frappe.db.get_value(
+					"RSD Notification Queue", entry.name, "retry_count"
+				) or 0
+				frappe.db.set_value("RSD Notification Queue", entry.name, {
+					"status": "Failed",
+					"retry_count": retry_count + 1,
+					"last_error": latest_log[0].error_message or "SFDA returned error RC",
+				})
+			else:
+				frappe.db.set_value(
+					"RSD Notification Queue", entry.name, "status", "Completed"
+				)
+
+			# Update RSD status on the source document
+			ref_dt = frappe.db.get_value("RSD Notification Queue", entry.name, "reference_doctype")
+			ref_dn = frappe.db.get_value("RSD Notification Queue", entry.name, "reference_name")
+			if ref_dt and ref_dn:
+				new_status = "Failed" if (latest_log and latest_log[0].status == "Error") else "Sent"
+				try:
+					frappe.db.set_value(ref_dt, ref_dn, "custom_rsd_status", new_status, update_modified=False)
+				except Exception:
+					pass
+
 		except Exception:
 			retry_count = frappe.db.get_value(
 				"RSD Notification Queue", entry.name, "retry_count"

@@ -5,7 +5,7 @@ Service URLs (per DTTS-ISD.RETURN-1.0.2):
   Return:      {base}/ws/ReturnService/ReturnService?wsdl
   ReturnBatch: {base}/ws/ReturnBatchService/ReturnBatchService?wsdl
 """
-from sfda_rsd.sfda_rsd.connectors.rsd_connector import RSDConnector
+from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
 def return_product(gtin, serial_number, receiver_gln, batch_number=None, expiry_date=None):
@@ -35,7 +35,7 @@ def return_product(gtin, serial_number, receiver_gln, batch_number=None, expiry_
 def return_by_batch(gtin, batch_number, receiver_gln, quantity, expiry_date=None):
 	"""Return products by batch number."""
 	connector = RSDConnector()
-	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": quantity}
+	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": int(quantity)}
 	if expiry_date:
 		product["XD"] = expiry_date
 
