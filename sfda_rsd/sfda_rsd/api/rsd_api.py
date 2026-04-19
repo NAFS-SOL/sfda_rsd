@@ -234,10 +234,211 @@ def check_status(gtin, serial_number):
 
 
 @frappe.whitelist()
-def get_drug_list():
-	"""Fetch the SFDA drug list."""
+def get_drug_list(drug_status="-1"):
+	"""Fetch the SFDA drug list. drug_status: "-1"=ALL, "0"=PASSIVE, "1"=ACTIVE."""
 	from sfda_rsd.connectors.services.query_service import get_drug_list as _get
-	return _get()
+	return _get(drug_status=drug_status)
+
+
+@frappe.whitelist()
+def debug_wsdl_schema(service_name="DrugListService"):
+	"""Introspect a service's WSDL and return its operations and input types.
+
+	Diagnostic only — reveals required elements and enum values for any
+	SFDA service. Example: debug_wsdl_schema("DrugListService").
+	"""
+	from sfda_rsd.connectors.rsd_connector import RSDConnector
+
+	connector = RSDConnector()
+	client = connector._get_client(service_name)
+
+	result = {"service": service_name, "operations": {}}
+	try:
+		for op_name, op in client.service._binding._operations.items():
+			entry = {}
+			try:
+				entry["input"] = str(op.input.signature(schema=client.wsdl.types))
+			except Exception as e:
+				entry["input_error"] = str(e)
+			try:
+				entry["output"] = str(op.output.signature(schema=client.wsdl.types))
+			except Exception as e:
+				entry["output_error"] = str(e)
+			result["operations"][op_name] = entry
+	except Exception as e:
+		result["error"] = str(e)
+
+	types_dump = []
+	try:
+		for t in client.wsdl.types.types:
+			try:
+				qn = getattr(t, "qname", None)
+				if qn is None:
+					continue
+				sig = str(t.signature(schema=client.wsdl.types)) if hasattr(t, "signature") else str(t)
+				types_dump.append({"name": str(qn), "signature": sig})
+			except Exception:
+				continue
+		result["types"] = types_dump
+	except Exception as e:
+		result["types_error"] = str(e)
+
+	return result
+
+
+@frappe.whitelist()
+def enqueue_sfda_drug_sync(drug_status="-1"):
+	"""Queue a background job to sync the SFDA drug list and produce an Excel.
+
+	Called from the Item List button. The worker fetches the SFDA catalog,
+	cross-references every local Item by custom_gtin, writes an xlsx to the
+	File store, and publishes a realtime event when the file is ready.
+	"""
+	if not frappe.has_permission("Item", "read"):
+		frappe.throw("You don't have permission to read Items")
+
+	frappe.enqueue(
+		"sfda_rsd.sfda_rsd.api.rsd_api._run_sfda_drug_sync",
+		queue="long",
+		timeout=1500,
+		user=frappe.session.user,
+		drug_status=str(drug_status),
+	)
+	return {"status": "queued"}
+
+
+def _parse_drug_list_response(response):
+	"""Parse SFDA DrugList SOAP response into a {gtin: drug_name} dict.
+
+	The DrugListService response schema is not documented here, so walk the
+	zeep-serialized object looking for any node containing a GTIN plus a
+	name-like sibling. Falls back to re-parsing the raw XML from the latest
+	RSD Transaction Log if the zeep walk yields nothing.
+	"""
+	from zeep.helpers import serialize_object
+
+	NAME_KEYS = {"DRUGNAME", "PRODUCTNAME", "NAME", "TRADENAME", "PRODUCTDESC"}
+	drugs_map = {}
+
+	def walk(node):
+		if isinstance(node, dict):
+			gtin = node.get("GTIN") or node.get("gtin")
+			if gtin:
+				name = ""
+				for key, val in node.items():
+					if str(key).upper() in NAME_KEYS and val is not None:
+						name = str(val)
+						break
+				drugs_map[str(gtin).strip()] = name
+				return
+			for val in node.values():
+				walk(val)
+		elif isinstance(node, (list, tuple)):
+			for item in node:
+				walk(item)
+
+	try:
+		data = serialize_object(response) if response is not None else None
+		walk(data)
+	except Exception as e:
+		frappe.log_error(f"Drug list zeep parse failed: {e}", "SFDA Drug Sync")
+
+	if not drugs_map:
+		try:
+			from lxml import etree
+			log = frappe.get_all(
+				"RSD Transaction Log",
+				filters={"service_name": "DrugListService"},
+				fields=["response_xml"],
+				order_by="creation desc",
+				limit=1,
+			)
+			if log and log[0].response_xml:
+				root = etree.fromstring(log[0].response_xml.encode("utf-8"))
+				for drug in root.findall(".//{*}DRUG"):
+					gtin_text = drug.findtext("{*}GTIN") or drug.findtext("GTIN")
+					if not gtin_text:
+						continue
+					name = ""
+					for child in drug:
+						tag = etree.QName(child).localname.upper()
+						if tag in NAME_KEYS and child.text:
+							name = child.text.strip()
+							break
+					drugs_map[gtin_text.strip()] = name
+		except Exception as e:
+			frappe.log_error(f"Drug list XML fallback parse failed: {e}", "SFDA Drug Sync")
+
+	return drugs_map
+
+
+def _run_sfda_drug_sync(user, drug_status="-1"):
+	"""Background worker: fetch SFDA drug list, build Excel, attach as File."""
+	from frappe.utils.xlsxutils import make_xlsx
+	from sfda_rsd.connectors.services.query_service import get_drug_list as _get_drug_list
+
+	try:
+		response = _get_drug_list(drug_status=drug_status)
+		sfda_map = _parse_drug_list_response(response)
+
+		items = frappe.get_all(
+			"Item",
+			filters={"disabled": 0},
+			fields=["item_code", "item_name", "custom_gtin", "custom_is_rsd_tracked"],
+			order_by="item_code asc",
+		)
+
+		rows = [["Item Code", "Item Name", "GTIN", "Found in SFDA", "SFDA Drug Name", "Currently Tracked"]]
+		matched = 0
+		for it in items:
+			gtin = (it.get("custom_gtin") or "").strip()
+			if not gtin:
+				found, sfda_name = "No GTIN", ""
+			elif gtin in sfda_map:
+				found, sfda_name = "Yes", sfda_map[gtin]
+				matched += 1
+			else:
+				found, sfda_name = "No", ""
+			rows.append([
+				it.get("item_code") or "",
+				it.get("item_name") or "",
+				gtin,
+				found,
+				sfda_name,
+				"Yes" if it.get("custom_is_rsd_tracked") else "No",
+			])
+
+		xlsx = make_xlsx(rows, "SFDA Drug Sync")
+
+		ts = now_datetime().strftime("%Y%m%d_%H%M%S")
+		file_doc = frappe.new_doc("File")
+		file_doc.file_name = f"sfda_drug_sync_{ts}.xlsx"
+		file_doc.content = xlsx.getvalue()
+		file_doc.is_private = 1
+		file_doc.save(ignore_permissions=True)
+		frappe.db.commit()
+
+		frappe.publish_realtime(
+			"sfda_drug_sync_ready",
+			{
+				"file_url": file_doc.file_url,
+				"file_name": file_doc.file_name,
+				"matched": matched,
+				"total": len(items),
+				"sfda_count": len(sfda_map),
+			},
+			user=user,
+		)
+	except Exception as e:
+		frappe.log_error(
+			message=f"SFDA Drug Sync failed: {e}\n\n{frappe.get_traceback()}",
+			title="SFDA Drug Sync Error",
+		)
+		frappe.publish_realtime(
+			"sfda_drug_sync_failed",
+			{"error": str(e)[:500]},
+			user=user,
+		)
 
 
 @frappe.whitelist()

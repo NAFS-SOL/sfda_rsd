@@ -11,7 +11,7 @@ Service URLs:
   DispatchDetail:  {base}/ws/DispatchDetailService/DispatchDetailService?wsdl
 """
 import frappe
-from sfda_rsd.sfda_rsd.connectors.rsd_connector import RSDConnector
+from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
 def check_status(gtin, serial_number, batch_number=None, expiry_date=None):
@@ -30,11 +30,19 @@ def check_status(gtin, serial_number, batch_number=None, expiry_date=None):
 	)
 
 
-def get_drug_list():
-	"""Retrieve all drugs registered in the SFDA system."""
+def get_drug_list(drug_status="-1"):
+	"""Retrieve drugs registered in the SFDA system.
+
+	DRUGSTATUS LOV per DTTS-DEF-1.0.2:
+	  "-1" = ALL (default — full catalog)
+	   "0" = PASSIVE
+	   "1" = ACTIVE
+	"""
 	connector = RSDConnector()
 	return connector.call_service(
-		"DrugListService", "DrugListServiceRequest", {}
+		"DrugListService",
+		"DrugListServiceRequest",
+		{"DRUGSTATUS": str(drug_status)},
 	)
 
 
