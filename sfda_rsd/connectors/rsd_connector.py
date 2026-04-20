@@ -180,9 +180,25 @@ class RSDConnector:
 
 		except Exception as e:
 			status = "Error"
-			error_message = str(e)
+			raw_error = str(e)
+			request_xml = self._serialize_xml(self.history.last_sent)
+			response_xml = self._serialize_xml(self.history.last_received)
+
+			# zeep raises an opaque "'NoneType' object has no attribute 'getroottree'"
+			# when SFDA returns an empty / non-XML body. Translate that to something
+			# actionable — the raw message tells the user nothing about the cause.
+			if "getroottree" in raw_error or not (response_xml or "").strip():
+				error_message = (
+					f"SFDA returned an empty response for {service_name}. "
+					"The service may not be available for this stakeholder in the "
+					"current environment. Contact SFDA support (Tracking.drug@sfda.gov.sa) "
+					"quoting the RSD Transaction Log entry."
+				)
+			else:
+				error_message = raw_error
+
 			frappe.log_error(
-				message=f"RSD Error: {e}\n\n{traceback.format_exc()}",
+				message=f"RSD Error: {raw_error}\n\n{traceback.format_exc()}",
 				title=f"RSD {operation_name} Error",
 			)
 

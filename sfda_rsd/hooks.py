@@ -24,6 +24,9 @@ app_include_js = "/assets/sfda_rsd/js/rsd_button.js"
 # not triggered automatically. They can be called manually via API if needed.
 
 doc_events = {
+	"Item": {
+		"validate": "sfda_rsd.sfda_rsd.api.item_hooks.sync_gtin_to_barcodes",
+	},
 	"Stock Entry": {
 		"on_submit": "sfda_rsd.sfda_rsd.api.rsd_api.on_stock_entry_submit",
 		"on_cancel": "sfda_rsd.sfda_rsd.api.rsd_api.on_stock_entry_cancel",
