@@ -39,21 +39,29 @@ SERVICE_STATUS_MAP = {
 
 
 class RSDConnector:
-	"""Core SOAP client for SFDA RSD (DTTS) integration.
+	"""Core SOAP client for SFDA RSD (DTTS) integration, scoped to a single branch.
 
 	Usage:
-		connector = RSDConnector()
+		connector = RSDConnector(branch="Jeddah Main")
 		response = connector.call_service("AcceptService", "AcceptServiceRequest", {
 			"FROMGLN": "6281100000123",
 			"PRODUCTLIST": {"PRODUCT": [{"GTIN": "06281100000123", "SN": "ABC123"}]},
 		})
 	"""
 
-	def __init__(self):
-		self.settings = frappe.get_single("RSD Settings")
-		if not self.settings.enabled:
-			frappe.throw("RSD Integration is not enabled. Enable it in RSD Settings.")
+	def __init__(self, branch):
+		if not branch:
+			frappe.throw("Branch is required to instantiate RSDConnector")
 
+		settings_name = frappe.db.get_value("RSD Settings", {"branch": branch}, "name")
+		if not settings_name:
+			frappe.throw(f"No RSD Settings configured for branch '{branch}'")
+
+		self.settings = frappe.get_doc("RSD Settings", settings_name)
+		if not self.settings.enabled:
+			frappe.throw(f"RSD Integration is not enabled for branch '{branch}'.")
+
+		self.branch = branch
 		self.username = self.settings.username
 		self.password = self.settings.get_password("password")
 		self.gln = self.settings.stakeholder_gln
@@ -401,6 +409,7 @@ class RSDConnector:
 		try:
 			log = frappe.get_doc({
 				"doctype": "RSD Transaction Log",
+				"branch": self.branch,
 				"service_name": service_name,
 				"operation": operation,
 				"request_xml": request_xml,
@@ -418,17 +427,16 @@ class RSDConnector:
 
 
 def retry_failed_notifications():
-	"""Scheduled job: retry failed RSD notifications from the queue."""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
-		return
+	"""Scheduled job: retry failed RSD notifications from the queue.
 
-	max_retries = settings.max_retries or 3
-
+	Per-branch: each queue entry carries its own `branch`. We load that branch's
+	RSD Settings to instantiate the connector. Entries without a branch, or
+	whose branch config is missing/disabled, are marked Failed without retry.
+	"""
 	queue_entries = frappe.get_all(
 		"RSD Notification Queue",
-		filters={"status": ["in", ["Failed", "Pending"]], "retry_count": ["<", max_retries]},
-		fields=["name", "service_name", "operation", "parameters"],
+		filters={"status": ["in", ["Failed", "Pending"]]},
+		fields=["name", "branch", "service_name", "operation", "parameters", "retry_count"],
 		order_by="creation asc",
 		limit=50,
 	)
@@ -436,20 +444,58 @@ def retry_failed_notifications():
 	if not queue_entries:
 		return
 
-	connector = RSDConnector()
+	# Cache connectors per branch so we don't re-fetch settings for every entry
+	connectors = {}
+
+	def _get_connector(branch):
+		if branch not in connectors:
+			connectors[branch] = RSDConnector(branch=branch)
+		return connectors[branch]
 
 	for entry in queue_entries:
+		# Entries without branch can't be retried — mark Failed and move on
+		if not entry.branch:
+			frappe.db.set_value("RSD Notification Queue", entry.name, {
+				"status": "Failed",
+				"last_error": "Queue entry has no branch; cannot resolve credentials",
+			})
+			continue
+
+		# Fetch per-branch max_retries via the settings record
+		settings_name = frappe.db.get_value("RSD Settings", {"branch": entry.branch}, "name")
+		if not settings_name:
+			frappe.db.set_value("RSD Notification Queue", entry.name, {
+				"status": "Failed",
+				"last_error": f"No RSD Settings for branch '{entry.branch}'",
+			})
+			continue
+		branch_settings = frappe.db.get_value(
+			"RSD Settings", settings_name,
+			["enabled", "max_retries"], as_dict=True
+		)
+		if not branch_settings.enabled:
+			frappe.db.set_value("RSD Notification Queue", entry.name, {
+				"status": "Failed",
+				"last_error": f"RSD disabled for branch '{entry.branch}'",
+			})
+			continue
+		max_retries = branch_settings.max_retries or 3
+		if (entry.retry_count or 0) >= max_retries:
+			continue
+
 		try:
+			connector = _get_connector(entry.branch)
+
 			frappe.db.set_value(
 				"RSD Notification Queue", entry.name, "status", "Processing"
 			)
 			params = frappe.parse_json(entry.parameters)
 			connector.call_service(entry.service_name, entry.operation, params)
 
-			# Check the transaction log to see if SFDA returned errors
+			# Check the transaction log for this branch/service to see if SFDA returned errors
 			latest_log = frappe.get_all(
 				"RSD Transaction Log",
-				filters={"service_name": entry.service_name},
+				filters={"service_name": entry.service_name, "branch": entry.branch},
 				fields=["status", "error_message"],
 				order_by="creation desc",
 				limit=1,

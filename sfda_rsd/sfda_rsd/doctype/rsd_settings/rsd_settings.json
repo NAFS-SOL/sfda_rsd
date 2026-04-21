@@ -1,9 +1,11 @@
 {
  "actions": [],
+ "autoname": "field:branch",
  "creation": "2026-02-18 00:00:00.000000",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "branch",
   "enabled",
   "environment",
   "credentials_section",
@@ -22,10 +24,21 @@
  ],
  "fields": [
   {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "label": "Branch",
+   "options": "Branch",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
    "default": "0",
    "fieldname": "enabled",
    "fieldtype": "Check",
-   "label": "Enabled"
+   "label": "Enabled",
+   "in_list_view": 1
   },
   {
    "default": "Test",
@@ -33,7 +46,8 @@
    "fieldtype": "Select",
    "label": "Environment",
    "options": "Test\nProduction",
-   "description": "Test: tandttest.sfda.gov.sa | Production: rsd.sfda.gov.sa"
+   "description": "Test: tandttest.sfda.gov.sa | Production: rsd.sfda.gov.sa",
+   "in_list_view": 1
   },
   {
    "fieldname": "credentials_section",
@@ -61,7 +75,8 @@
    "fieldtype": "Data",
    "label": "Stakeholder GLN",
    "reqd": 1,
-   "description": "Your 13-digit Global Location Number from SFDA"
+   "description": "Your 13-digit Global Location Number from SFDA",
+   "in_list_view": 1
   },
   {
    "fieldname": "establishment_gln",
@@ -113,9 +128,8 @@
    "label": "Log Raw XML"
   }
  ],
- "issingle": 1,
  "links": [],
- "modified": "2026-03-05 00:00:00.000000",
+ "modified": "2026-04-20 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "SFDA RSD",
  "name": "RSD Settings",

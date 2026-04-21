@@ -5,10 +5,10 @@ Service URLs (per DTTS-ISD.ACCEPT-1.0.2):
   Accept:      {base}/ws/AcceptService/AcceptService?wsdl
   AcceptBatch: {base}/ws/AcceptBatchService/AcceptBatchService?wsdl
 """
-from sfda_rsd.sfda_rsd.connectors.rsd_connector import RSDConnector
+from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
-def accept_product(gtin, serial_number, sender_gln, batch_number=None, expiry_date=None):
+def accept_product(branch, gtin, serial_number, sender_gln, batch_number=None, expiry_date=None):
 	"""Accept a product dispatched to this stakeholder (by serial number).
 
 	Args:
@@ -18,7 +18,7 @@ def accept_product(gtin, serial_number, sender_gln, batch_number=None, expiry_da
 		batch_number: Optional batch number
 		expiry_date: Optional expiry date (YYYY-MM-DD)
 	"""
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	product = {"GTIN": gtin, "SN": serial_number}
 	if batch_number:
 		product["BN"] = batch_number
@@ -32,9 +32,9 @@ def accept_product(gtin, serial_number, sender_gln, batch_number=None, expiry_da
 	)
 
 
-def accept_by_batch(gtin, batch_number, sender_gln, quantity, expiry_date=None):
+def accept_by_batch(branch, gtin, batch_number, sender_gln, quantity, expiry_date=None):
 	"""Accept products by batch number."""
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": quantity}
 	if expiry_date:
 		product["XD"] = expiry_date
@@ -46,9 +46,9 @@ def accept_by_batch(gtin, batch_number, sender_gln, quantity, expiry_date=None):
 	)
 
 
-def accept_dispatch(notification_id):
+def accept_dispatch(branch, notification_id):
 	"""Accept ALL units in a dispatch notification at once."""
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	return connector.call_service(
 		"AcceptService",
 		"AcceptServiceRequest",
@@ -56,9 +56,9 @@ def accept_dispatch(notification_id):
 	)
 
 
-def accept_cancel(gtin, serial_number, sender_gln, batch_number=None, expiry_date=None):
+def accept_cancel(branch, gtin, serial_number, sender_gln, batch_number=None, expiry_date=None):
 	"""Cancel an accept operation."""
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	product = {"GTIN": gtin, "SN": serial_number}
 	if batch_number:
 		product["BN"] = batch_number

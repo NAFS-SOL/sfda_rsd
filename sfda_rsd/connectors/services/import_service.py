@@ -1,27 +1,12 @@
 # sfda_rsd/connectors/services/import_service.py
-"""SFDA DTTS Import services (warehouse/manufacturer operation).
-
-Service URLs (per DTTS-ISD.IMPORT-1.0.2):
-  Import:       {base}/ws/ImportService/ImportService?wsdl
-  ImportCancel: {base}/ws/ImportCancelService/ImportCancelService?wsdl
-
-NOTE: Import is a warehouse/manufacturer operation. Retained for completeness.
-"""
-from sfda_rsd.sfda_rsd.connectors.rsd_connector import RSDConnector
+"""SFDA DTTS Import services (warehouse/manufacturer operation)."""
+from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
-def import_product(gtin, serial_numbers, batch_number, expiry_date,
+def import_product(branch, gtin, serial_numbers, batch_number, expiry_date,
 				   manufacturing_date=None):
-	"""Register imported products into the system.
-
-	Args:
-		gtin: Global Trade Item Number
-		serial_numbers: List of serial numbers (SNREQUESTLIST)
-		batch_number: Batch/Lot number
-		expiry_date: Expiry date (YYYY-MM-DD)
-		manufacturing_date: Optional manufacturing date
-	"""
-	connector = RSDConnector()
+	"""Register imported products into the system."""
+	connector = RSDConnector(branch=branch)
 	params = {
 		"GTIN": gtin,
 		"BN": batch_number,
@@ -36,9 +21,9 @@ def import_product(gtin, serial_numbers, batch_number, expiry_date,
 	)
 
 
-def import_cancel(gtin, serial_number, batch_number=None, expiry_date=None):
+def import_cancel(branch, gtin, serial_number, batch_number=None, expiry_date=None):
 	"""Cancel an import."""
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	product = {"GTIN": gtin, "SN": serial_number}
 	if batch_number:
 		product["BN"] = batch_number

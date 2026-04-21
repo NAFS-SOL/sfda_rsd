@@ -4,9 +4,11 @@ from frappe.model.document import Document
 
 
 class RSDSettings(Document):
-	"""Singleton DocType for RSD configuration."""
+	"""Per-branch RSD configuration. One record per Branch."""
 
 	def validate(self):
+		if not self.branch:
+			frappe.throw("Branch is required")
 		if self.enabled and not self.username:
 			frappe.throw("DTTS Username is required when RSD is enabled")
 		if self.enabled and not self.password:
@@ -34,19 +36,27 @@ class RSDSettings(Document):
 
 
 @frappe.whitelist()
-def test_rsd_connection():
-	"""Test SFDA RSD connection using zeep SOAP client.
+def test_rsd_connection(branch):
+	"""Test SFDA RSD connection for a specific branch using zeep SOAP client.
 
 	Tests three things in sequence:
 	1. Network connectivity — can we reach the SFDA server?
 	2. WSDL fetch — can zeep download and parse the WSDL (with auth)?
 	3. SOAP call — can we execute a read-only ErrorCodeList request?
 	"""
-	settings = frappe.get_single("RSD Settings")
+	if not branch:
+		frappe.throw("Branch is required")
+
+	settings_name = frappe.db.get_value("RSD Settings", {"branch": branch}, "name")
+	if not settings_name:
+		frappe.throw(f"No RSD Settings configured for branch '{branch}'")
+	settings = frappe.get_doc("RSD Settings", settings_name)
+
 	if not settings.enabled:
-		frappe.throw("RSD Integration is not enabled. Enable it first.")
+		frappe.throw(f"RSD Integration is not enabled for branch '{branch}'. Enable it first.")
 
 	results = {
+		"branch": branch,
 		"environment": settings.environment,
 		"base_url": settings.get_base_url(),
 		"wsdl_url": settings.get_wsdl_url("ErrorCodeListService"),
@@ -86,7 +96,7 @@ def test_rsd_connection():
 	# Step 2 & 3: Test WSDL fetch + SOAP call via zeep (zeep handles auth for WSDL fetch)
 	try:
 		from sfda_rsd.connectors.rsd_connector import RSDConnector
-		connector = RSDConnector()
+		connector = RSDConnector(branch=branch)
 
 		# _get_client fetches and parses the WSDL (with WS-Security credentials)
 		client = connector._get_client("ErrorCodeListService")

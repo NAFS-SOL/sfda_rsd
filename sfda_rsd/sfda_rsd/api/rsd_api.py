@@ -13,18 +13,70 @@ from frappe.utils import now_datetime
 
 
 # ---------------------------------------------------------------------------
+# Branch resolution helpers
+# ---------------------------------------------------------------------------
+
+def _resolve_branch(doc):
+	"""Resolve the branch for a transactional doc.
+
+	Parent `branch` field for Purchase Receipt / Sales Invoice / Delivery Note.
+	First item row's `branch` for Stock Entry (no parent branch field).
+	Returns branch name (str) or None.
+	"""
+	if doc.doctype in ("Purchase Receipt", "Sales Invoice", "Delivery Note"):
+		return doc.get("branch")
+	if doc.doctype == "Stock Entry":
+		for item in (doc.get("items") or []):
+			b = item.get("branch")
+			if b:
+				return b
+	return None
+
+
+def _get_branch_settings(branch):
+	"""Return the enabled RSD Settings doc for a branch, or None."""
+	if not branch:
+		return None
+	name = frappe.db.get_value("RSD Settings", {"branch": branch, "enabled": 1}, "name")
+	return frappe.get_doc("RSD Settings", name) if name else None
+
+
+def _skip_rsd(doc, reason):
+	"""Mark a document as Not Applicable for RSD and log the reason once.
+
+	Called when a submitted doc has no branch, or its branch has no RSD
+	Settings configured, or its settings record has enabled=0.
+	"""
+	try:
+		frappe.db.set_value(doc.doctype, doc.name, {
+			"custom_rsd_status": "Not Applicable",
+		}, update_modified=False)
+	except Exception:
+		pass
+	frappe.logger().info(
+		f"RSD: skipped {doc.doctype} {doc.name} — {reason}"
+	)
+
+
+# ---------------------------------------------------------------------------
 # Helper: Enqueue RSD notification for async processing
 # ---------------------------------------------------------------------------
 
-def _enqueue_rsd_notification(service_name, operation, params,
+def _enqueue_rsd_notification(service_name, operation, params, branch,
 							  reference_doctype=None, reference_name=None):
-	"""Create an RSD Notification Queue entry for background processing."""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	"""Create an RSD Notification Queue entry for background processing.
+
+	Requires branch; resolves RSD Settings for that branch. If no enabled
+	config exists for the branch, silently returns None — caller should have
+	already marked the source doc Not Applicable via _skip_rsd.
+	"""
+	settings = _get_branch_settings(branch)
+	if not settings:
 		return None
 
 	queue_entry = frappe.get_doc({
 		"doctype": "RSD Notification Queue",
+		"branch": branch,
 		"service_name": service_name,
 		"operation": operation,
 		"parameters": frappe.as_json(params),
@@ -129,127 +181,127 @@ def _get_item_batch_no(item):
 # -- Pharmacy core operations --
 
 @frappe.whitelist()
-def accept_product(gtin, serial_number, sender_gln):
+def accept_product(branch, gtin, serial_number, sender_gln):
 	"""Manually accept a received product."""
 	from sfda_rsd.connectors.services.accept_service import accept_product as _accept
-	return _accept(gtin, serial_number, sender_gln)
+	return _accept(branch, gtin, serial_number, sender_gln)
 
 
 @frappe.whitelist()
-def accept_by_batch(gtin, batch_number, sender_gln, quantity):
+def accept_by_batch(branch, gtin, batch_number, sender_gln, quantity):
 	"""Accept products by batch number."""
 	from sfda_rsd.connectors.services.accept_service import accept_by_batch as _accept
-	return _accept(gtin, batch_number, sender_gln, int(quantity))
+	return _accept(branch, gtin, batch_number, sender_gln, int(quantity))
 
 
 @frappe.whitelist()
-def accept_dispatch(notification_id):
+def accept_dispatch(branch, notification_id):
 	"""Accept all units in a dispatch notification."""
 	from sfda_rsd.connectors.services.accept_service import accept_dispatch as _accept
-	return _accept(notification_id)
+	return _accept(branch, notification_id)
 
 
 @frappe.whitelist()
-def pharmacy_sale(products, to_gln="0000000000000", prescription_id=None,
+def pharmacy_sale(branch, products, to_gln="0000000000000", prescription_id=None,
 				  prescription_date=None):
 	"""Record a pharmacy sale."""
 	if isinstance(products, str):
 		products = frappe.parse_json(products)
 	from sfda_rsd.connectors.services.pharmacy_sale_service import pharmacy_sale as _sale
-	return _sale(products, to_gln, prescription_id, prescription_date)
+	return _sale(branch, products, to_gln, prescription_id, prescription_date)
 
 
 @frappe.whitelist()
-def pharmacy_sale_cancel(products, to_gln="0000000000000", prescription_id=None):
+def pharmacy_sale_cancel(branch, products, to_gln="0000000000000", prescription_id=None):
 	"""Cancel a pharmacy sale."""
 	if isinstance(products, str):
 		products = frappe.parse_json(products)
 	from sfda_rsd.connectors.services.pharmacy_sale_service import pharmacy_sale_cancel as _cancel
-	return _cancel(products, to_gln, prescription_id)
+	return _cancel(branch, products, to_gln, prescription_id)
 
 
 @frappe.whitelist()
-def deactivate_product(gtin, serial_number, deactivation_reason, explanation=None):
+def deactivate_product(branch, gtin, serial_number, deactivation_reason, explanation=None):
 	"""Deactivate a product (damage, recall, etc.)."""
 	from sfda_rsd.connectors.services.deactivate_service import deactivate_product as _deactivate
-	return _deactivate(gtin, serial_number, deactivation_reason, explanation)
+	return _deactivate(branch, gtin, serial_number, deactivation_reason, explanation)
 
 
 @frappe.whitelist()
-def deactivate_cancel(gtin, serial_number):
+def deactivate_cancel(branch, gtin, serial_number):
 	"""Cancel a deactivation."""
 	from sfda_rsd.connectors.services.deactivate_service import deactivate_cancel as _cancel
-	return _cancel(gtin, serial_number)
+	return _cancel(branch, gtin, serial_number)
 
 
 @frappe.whitelist()
-def return_product(gtin, serial_number, receiver_gln):
+def return_product(branch, gtin, serial_number, receiver_gln):
 	"""Return a product to sender."""
 	from sfda_rsd.connectors.services.return_service import return_product as _return
-	return _return(gtin, serial_number, receiver_gln)
+	return _return(branch, gtin, serial_number, receiver_gln)
 
 
 @frappe.whitelist()
-def return_by_batch(gtin, batch_number, receiver_gln, quantity):
+def return_by_batch(branch, gtin, batch_number, receiver_gln, quantity):
 	"""Return products by batch number."""
 	from sfda_rsd.connectors.services.return_service import return_by_batch as _return
-	return _return(gtin, batch_number, receiver_gln, int(quantity))
+	return _return(branch, gtin, batch_number, receiver_gln, int(quantity))
 
 
 @frappe.whitelist()
-def transfer_product(gtin, serial_number, receiver_gln):
+def transfer_product(branch, gtin, serial_number, receiver_gln):
 	"""Transfer between same-type stakeholders (pharmacy-to-pharmacy)."""
 	from sfda_rsd.connectors.services.transfer_service import transfer_product as _transfer
-	return _transfer(gtin, serial_number, receiver_gln)
+	return _transfer(branch, gtin, serial_number, receiver_gln)
 
 
 @frappe.whitelist()
-def transfer_by_batch(gtin, batch_number, receiver_gln, quantity):
+def transfer_by_batch(branch, gtin, batch_number, receiver_gln, quantity):
 	"""Transfer products by batch number."""
 	from sfda_rsd.connectors.services.transfer_service import transfer_by_batch as _transfer
-	return _transfer(gtin, batch_number, receiver_gln, int(quantity))
+	return _transfer(branch, gtin, batch_number, receiver_gln, int(quantity))
 
 
 @frappe.whitelist()
-def dispatch_product(gtin, serial_number, receiver_gln):
+def dispatch_product(branch, gtin, serial_number, receiver_gln):
 	"""Manually dispatch a product."""
 	from sfda_rsd.connectors.services.dispatch_service import dispatch_product as _dispatch
-	return _dispatch(gtin, serial_number, receiver_gln)
+	return _dispatch(branch, gtin, serial_number, receiver_gln)
 
 
 @frappe.whitelist()
-def dispatch_by_batch(gtin, batch_number, receiver_gln, quantity):
+def dispatch_by_batch(branch, gtin, batch_number, receiver_gln, quantity):
 	"""Dispatch products by batch number."""
 	from sfda_rsd.connectors.services.dispatch_service import dispatch_by_batch as _dispatch
-	return _dispatch(gtin, batch_number, receiver_gln, int(quantity))
+	return _dispatch(branch, gtin, batch_number, receiver_gln, int(quantity))
 
 
 # -- Query operations --
 
 @frappe.whitelist()
-def check_status(gtin, serial_number):
+def check_status(branch, gtin, serial_number):
 	"""Query the current status of a drug unit."""
 	from sfda_rsd.connectors.services.query_service import check_status as _check
-	return _check(gtin, serial_number)
+	return _check(branch, gtin, serial_number)
 
 
 @frappe.whitelist()
-def get_drug_list(drug_status="-1"):
+def get_drug_list(branch, drug_status="-1"):
 	"""Fetch the SFDA drug list. drug_status: "-1"=ALL, "0"=PASSIVE, "1"=ACTIVE."""
 	from sfda_rsd.connectors.services.query_service import get_drug_list as _get
-	return _get(drug_status=drug_status)
+	return _get(branch=branch, drug_status=drug_status)
 
 
 @frappe.whitelist()
-def debug_wsdl_schema(service_name="DrugListService"):
+def debug_wsdl_schema(branch, service_name="DrugListService"):
 	"""Introspect a service's WSDL and return its operations and input types.
 
 	Diagnostic only — reveals required elements and enum values for any
-	SFDA service. Example: debug_wsdl_schema("DrugListService").
+	SFDA service. Scoped to a specific branch's credentials.
 	"""
 	from sfda_rsd.connectors.rsd_connector import RSDConnector
 
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	client = connector._get_client(service_name)
 
 	result = {"service": service_name, "operations": {}}
@@ -287,21 +339,27 @@ def debug_wsdl_schema(service_name="DrugListService"):
 
 
 @frappe.whitelist()
-def enqueue_sfda_drug_sync(drug_status="-1"):
-	"""Queue a background job to sync the SFDA drug list and produce an Excel.
+def enqueue_sfda_drug_sync(branch, drug_status="-1"):
+	"""Queue a background job to sync the SFDA drug list for a branch.
 
-	Called from the Item List button. The worker fetches the SFDA catalog,
+	The worker fetches the SFDA catalog using the branch's credentials,
 	cross-references every local Item by custom_gtin, writes an xlsx to the
 	File store, and publishes a realtime event when the file is ready.
 	"""
+	if not branch:
+		frappe.throw("Branch is required")
 	if not frappe.has_permission("Item", "read"):
 		frappe.throw("You don't have permission to read Items")
+	# Fail fast if the branch has no enabled settings
+	if not _get_branch_settings(branch):
+		frappe.throw(f"No enabled RSD Settings for branch '{branch}'")
 
 	frappe.enqueue(
 		"sfda_rsd.sfda_rsd.api.rsd_api._run_sfda_drug_sync",
 		queue="long",
 		timeout=1500,
 		user=frappe.session.user,
+		branch=branch,
 		drug_status=str(drug_status),
 	)
 	return {"status": "queued"}
@@ -372,13 +430,13 @@ def _parse_drug_list_response(response):
 	return drugs_map
 
 
-def _run_sfda_drug_sync(user, drug_status="-1"):
-	"""Background worker: fetch SFDA drug list, build Excel, attach as File."""
+def _run_sfda_drug_sync(user, branch, drug_status="-1"):
+	"""Background worker: fetch SFDA drug list for a branch, build Excel, attach as File."""
 	from frappe.utils.xlsxutils import make_xlsx
 	from sfda_rsd.connectors.services.query_service import get_drug_list as _get_drug_list
 
 	try:
-		response = _get_drug_list(drug_status=drug_status)
+		response = _get_drug_list(branch=branch, drug_status=drug_status)
 		sfda_map = _parse_drug_list_response(response)
 
 		items = frappe.get_all(
@@ -421,6 +479,7 @@ def _run_sfda_drug_sync(user, drug_status="-1"):
 		frappe.publish_realtime(
 			"sfda_drug_sync_ready",
 			{
+				"branch": branch,
 				"file_url": file_doc.file_url,
 				"file_name": file_doc.file_name,
 				"matched": matched,
@@ -442,17 +501,17 @@ def _run_sfda_drug_sync(user, drug_status="-1"):
 
 
 @frappe.whitelist()
-def get_stakeholder_list():
-	"""Fetch the SFDA stakeholder list."""
+def get_stakeholder_list(branch):
+	"""Fetch the SFDA stakeholder list for a branch."""
 	from sfda_rsd.connectors.services.query_service import get_stakeholder_list as _get
-	return _get()
+	return _get(branch)
 
 
 @frappe.whitelist()
-def get_error_codes(error_code=None):
-	"""Fetch SFDA error code descriptions."""
+def get_error_codes(branch, error_code=None):
+	"""Fetch SFDA error code descriptions for a branch."""
 	from sfda_rsd.connectors.services.query_service import get_error_codes as _get
-	return _get(error_code)
+	return _get(branch, error_code)
 
 
 @frappe.whitelist()
@@ -468,7 +527,8 @@ def manual_rsd_trigger(doctype, docname):
 	"""Manually send RSD notification immediately (not queued).
 
 	Builds the same params as the on_submit handler, then calls the
-	SOAP service directly via RSDConnector and returns the result.
+	SOAP service directly via RSDConnector (scoped to the doc's branch)
+	and returns the result.
 	"""
 	if doctype not in ("Purchase Receipt", "Sales Invoice", "Delivery Note", "Stock Entry"):
 		frappe.throw("Invalid doctype for RSD trigger")
@@ -477,8 +537,16 @@ def manual_rsd_trigger(doctype, docname):
 	if doc.docstatus != 1:
 		frappe.throw("Document must be submitted")
 
+	branch = _resolve_branch(doc)
+	if not branch:
+		frappe.throw(f"Cannot resolve branch for {doctype} {docname}")
+
+	settings = _get_branch_settings(branch)
+	if not settings:
+		frappe.throw(f"No enabled RSD Settings for branch '{branch}'")
+
 	from sfda_rsd.connectors.rsd_connector import RSDConnector
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	results = []
 
 	if doctype == "Purchase Receipt":
@@ -538,7 +606,6 @@ def manual_rsd_trigger(doctype, docname):
 					results.append({"service": "AcceptBatchService", "response": str(resp)})
 
 	elif doctype == "Sales Invoice":
-		settings = frappe.get_single("RSD Settings")
 		customer_gln = frappe.db.get_value("Customer", doc.customer, "custom_gln")
 		is_consumer = not customer_gln or customer_gln == "0000000000000"
 		is_return = doc.get("is_return") or False
@@ -710,18 +777,32 @@ def manual_rsd_trigger(doctype, docname):
 # ---------------------------------------------------------------------------
 
 def on_stock_entry_submit(doc, method):
-	"""Handle Stock Entry submit -- Material Issue = Deactivation only.
+	"""Router for Stock Entry submit.
+
+	Material Issue → Deactivation notification.
+	Material Transfer (Across Branch, different GLNs) → Transfer notification.
+	"""
+	if doc.purpose not in ("Material Issue", "Material Transfer"):
+		return
+
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
+		return
+
+	if doc.purpose == "Material Issue":
+		_handle_se_deactivation(doc, branch)
+	else:  # Material Transfer
+		_handle_se_transfer(doc, branch, settings, cancel=False)
+
+
+def _handle_se_deactivation(doc, branch):
+	"""Emit DeactivationService notifications for a Material Issue Stock Entry.
 
 	Deactivation requires serial numbers (no batch variant exists in SFDA).
 	Uses serial_no or custom_rsd_serial_no as fallback.
 	"""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
-		return
-
-	if doc.purpose != "Material Issue":
-		return
-
 	dr = (doc.get("custom_rsd_deactivation_reason") or "30").split(" ")[0]
 
 	for item in doc.items:
@@ -752,9 +833,76 @@ def on_stock_entry_submit(doc, method):
 			}
 
 			_enqueue_rsd_notification(
+				branch=branch,
 				service_name="DeactivationService",
 				operation="DeactivationServiceRequest",
 				params=params,
+				reference_doctype="Stock Entry",
+				reference_name=doc.name,
+			)
+
+
+def _handle_se_transfer(doc, source_branch, source_settings, cancel):
+	"""Emit TransferService / TransferCancelService for a Material Transfer Stock Entry.
+
+	Skips if:
+	  - Transfer scope is not "Across Branch" (intra-branch moves need no RSD)
+	  - Target branch is unset
+	  - Target branch has no enabled RSD Settings / GLN
+	  - Source and target branches share the same stakeholder GLN
+	"""
+	scope = doc.get("custom_rsd_transfer_scope")
+	if scope != "Across Branch":
+		_skip_rsd(doc, f"transfer scope is '{scope or 'Within Branch'}' — no SFDA notification")
+		return
+
+	target_branch = doc.get("custom_rsd_target_branch")
+	if not target_branch:
+		_skip_rsd(doc, "across-branch transfer without target branch set")
+		return
+
+	target_settings = _get_branch_settings(target_branch)
+	if not target_settings or not target_settings.stakeholder_gln:
+		_skip_rsd(doc, f"target branch '{target_branch}' has no enabled RSD Settings or GLN")
+		return
+
+	if source_settings.stakeholder_gln == target_settings.stakeholder_gln:
+		_skip_rsd(doc, f"source and target branch share GLN '{source_settings.stakeholder_gln}' — no notification needed")
+		return
+
+	to_gln = target_settings.stakeholder_gln
+	serial_svc = "TransferCancelService" if cancel else "TransferService"
+	batch_svc = "TransferCancelBatchService" if cancel else "TransferBatchService"
+
+	for item in doc.items:
+		if not _is_rsd_tracked(item.item_code):
+			continue
+		info = _get_item_rsd_info(item.item_code)
+		if not info or not info.custom_gtin:
+			continue
+		gtin = info.custom_gtin
+		qty = abs(int(item.qty))
+
+		if item.serial_no:
+			products = _build_product_entries(item, gtin)
+			_enqueue_rsd_notification(
+				branch=source_branch,
+				service_name=serial_svc,
+				operation=f"{serial_svc}Request",
+				params={"TOGLN": to_gln, "PRODUCTLIST": {"PRODUCT": products}},
+				reference_doctype="Stock Entry",
+				reference_name=doc.name,
+			)
+		elif item.batch_no and info.has_batch_no:
+			product = {"GTIN": gtin, "BN": item.batch_no, "QUANTITY": qty}
+			expiry = frappe.db.get_value("Batch", item.batch_no, "expiry_date")
+			if expiry:
+				product["XD"] = str(expiry)
+			_enqueue_rsd_notification(
+				branch=source_branch,
+				service_name=batch_svc,
+				operation=f"{batch_svc}Request",
+				params={"TOGLN": to_gln, "PRODUCTLIST": {"PRODUCT": [product]}},
 				reference_doctype="Stock Entry",
 				reference_name=doc.name,
 			)
@@ -766,8 +914,10 @@ def on_purchase_receipt_submit(doc, method):
 	Normal receipt → AcceptService (receiving from supplier)
 	Purchase Return (is_return=1) → ReturnBatchService (returning to supplier)
 	"""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
 	supplier_gln = frappe.db.get_value("Supplier", doc.supplier, "custom_gln")
@@ -792,6 +942,7 @@ def on_purchase_receipt_submit(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="ReturnService",
 					operation="ReturnServiceRequest",
 					params={
@@ -807,6 +958,7 @@ def on_purchase_receipt_submit(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="ReturnBatchService",
 					operation="ReturnBatchServiceRequest",
 					params={
@@ -821,6 +973,7 @@ def on_purchase_receipt_submit(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="AcceptService",
 					operation="AcceptServiceRequest",
 					params={
@@ -836,6 +989,7 @@ def on_purchase_receipt_submit(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="AcceptBatchService",
 					operation="AcceptBatchServiceRequest",
 					params={
@@ -853,8 +1007,10 @@ def on_sales_invoice_submit(doc, method):
 	Consumer sale (no GLN or GLN=0000000000000) → PharmacySale / PharmacySaleCancel
 	B2B sale (customer has real GLN) → Transfer / TransferCancel
 	"""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
 	customer_gln = frappe.db.get_value("Customer", doc.customer, "custom_gln")
@@ -907,6 +1063,7 @@ def on_sales_invoice_submit(doc, method):
 		if is_return:
 			original_invoice = doc.get("return_against") or doc.name
 			_enqueue_rsd_notification(
+				branch=branch,
 				service_name="PharmacySaleCancelService",
 				operation="PharmacySaleCancelServiceRequest",
 				params={
@@ -919,6 +1076,7 @@ def on_sales_invoice_submit(doc, method):
 			)
 		else:
 			_enqueue_rsd_notification(
+				branch=branch,
 				service_name="PharmacySaleService",
 				operation="PharmacySaleServiceRequest",
 				params={
@@ -939,6 +1097,7 @@ def on_sales_invoice_submit(doc, method):
 		if is_return:
 			if serial_products:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelService",
 					operation="TransferCancelServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": serial_products}},
@@ -947,6 +1106,7 @@ def on_sales_invoice_submit(doc, method):
 				)
 			for bp in batch_products:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelBatchService",
 					operation="TransferCancelBatchServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": [bp]}},
@@ -956,6 +1116,7 @@ def on_sales_invoice_submit(doc, method):
 		else:
 			if serial_products:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferService",
 					operation="TransferServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": serial_products}},
@@ -964,6 +1125,7 @@ def on_sales_invoice_submit(doc, method):
 				)
 			for bp in batch_products:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferBatchService",
 					operation="TransferBatchServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": [bp]}},
@@ -979,8 +1141,10 @@ def on_delivery_note_submit(doc, method):
 	Normal DN → TransferService / TransferBatchService
 	Return DN → TransferCancelService / TransferCancelBatchService
 	"""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
 	customer_gln = frappe.db.get_value("Customer", doc.customer, "custom_gln")
@@ -1005,6 +1169,7 @@ def on_delivery_note_submit(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelService",
 					operation="TransferCancelServiceRequest",
 					params={
@@ -1020,6 +1185,7 @@ def on_delivery_note_submit(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelBatchService",
 					operation="TransferCancelBatchServiceRequest",
 					params={
@@ -1034,6 +1200,7 @@ def on_delivery_note_submit(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferService",
 					operation="TransferServiceRequest",
 					params={
@@ -1053,6 +1220,7 @@ def on_delivery_note_submit(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferBatchService",
 					operation="TransferBatchServiceRequest",
 					params={
@@ -1069,11 +1237,27 @@ def on_delivery_note_submit(doc, method):
 # ---------------------------------------------------------------------------
 
 def on_stock_entry_cancel(doc, method):
-	"""Cancel Stock Entry → DeactivationCancelService."""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled or doc.purpose != "Material Issue":
+	"""Router for Stock Entry cancel.
+
+	Material Issue → DeactivationCancelService.
+	Material Transfer (Across Branch, different GLNs) → TransferCancelService.
+	"""
+	if doc.purpose not in ("Material Issue", "Material Transfer"):
+		return
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
+	if doc.purpose == "Material Issue":
+		_handle_se_deactivation_cancel(doc, branch)
+	else:  # Material Transfer
+		_handle_se_transfer(doc, branch, settings, cancel=True)
+
+
+def _handle_se_deactivation_cancel(doc, branch):
+	"""Emit DeactivationCancelService notifications for a cancelled Material Issue."""
 	for item in doc.items:
 		if not _is_rsd_tracked(item.item_code):
 			continue
@@ -1090,6 +1274,7 @@ def on_stock_entry_cancel(doc, method):
 				continue
 			prod = _build_serial_product(gtin, sn, batch_no)
 			_enqueue_rsd_notification(
+				branch=branch,
 				service_name="DeactivationCancelService",
 				operation="DeactivationCancelServiceRequest",
 				params={"PRODUCTLIST": {"PRODUCT": [prod]}},
@@ -1100,8 +1285,10 @@ def on_stock_entry_cancel(doc, method):
 
 def on_purchase_receipt_cancel(doc, method):
 	"""Cancel PR: normal → Return (reverse accept). Return → Accept (reverse return)."""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
 	supplier_gln = frappe.db.get_value("Supplier", doc.supplier, "custom_gln")
@@ -1125,6 +1312,7 @@ def on_purchase_receipt_cancel(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="AcceptService", operation="AcceptServiceRequest",
 					params={"FROMGLN": supplier_gln, "PRODUCTLIST": {"PRODUCT": products}},
 					reference_doctype="Purchase Receipt", reference_name=doc.name)
@@ -1134,6 +1322,7 @@ def on_purchase_receipt_cancel(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="AcceptBatchService", operation="AcceptBatchServiceRequest",
 					params={"FROMGLN": supplier_gln, "PRODUCTLIST": {"PRODUCT": [product]}},
 					reference_doctype="Purchase Receipt", reference_name=doc.name)
@@ -1141,6 +1330,7 @@ def on_purchase_receipt_cancel(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="ReturnService", operation="ReturnServiceRequest",
 					params={"TOGLN": supplier_gln, "PRODUCTLIST": {"PRODUCT": products}},
 					reference_doctype="Purchase Receipt", reference_name=doc.name)
@@ -1150,6 +1340,7 @@ def on_purchase_receipt_cancel(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="ReturnBatchService", operation="ReturnBatchServiceRequest",
 					params={"TOGLN": supplier_gln, "PRODUCTLIST": {"PRODUCT": [product]}},
 					reference_doctype="Purchase Receipt", reference_name=doc.name)
@@ -1157,8 +1348,10 @@ def on_purchase_receipt_cancel(doc, method):
 
 def on_sales_invoice_cancel(doc, method):
 	"""Cancel SI: consumer normal → SaleCancel. Consumer return → Sale. B2B normal → TransferCancel. B2B return → Transfer."""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
 	customer_gln = frappe.db.get_value("Customer", doc.customer, "custom_gln")
@@ -1199,12 +1392,14 @@ def on_sales_invoice_cancel(doc, method):
 		to_gln = getattr(settings, "pharmacy_sale_togln", None) or "0000000000000"
 		if was_return:
 			_enqueue_rsd_notification(
+				branch=branch,
 				service_name="PharmacySaleService", operation="PharmacySaleServiceRequest",
 				params={"TOGLN": to_gln, "PRODUCTLIST": {"PRODUCT": products},
 						"PRESCRIPTIONID": doc.name, "PRESCRIPTIONDATE": str(doc.posting_date)},
 				reference_doctype="Sales Invoice", reference_name=doc.name)
 		else:
 			_enqueue_rsd_notification(
+				branch=branch,
 				service_name="PharmacySaleCancelService", operation="PharmacySaleCancelServiceRequest",
 				params={"TOGLN": to_gln, "PRODUCTLIST": {"PRODUCT": products},
 						"PRESCRIPTIONID": doc.name},
@@ -1215,22 +1410,26 @@ def on_sales_invoice_cancel(doc, method):
 		if was_return:
 			if serial_prods:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferService", operation="TransferServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": serial_prods}},
 					reference_doctype="Sales Invoice", reference_name=doc.name)
 			for bp in batch_prods:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferBatchService", operation="TransferBatchServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": [bp]}},
 					reference_doctype="Sales Invoice", reference_name=doc.name)
 		else:
 			if serial_prods:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelService", operation="TransferCancelServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": serial_prods}},
 					reference_doctype="Sales Invoice", reference_name=doc.name)
 			for bp in batch_prods:
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelBatchService", operation="TransferCancelBatchServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": [bp]}},
 					reference_doctype="Sales Invoice", reference_name=doc.name)
@@ -1238,8 +1437,10 @@ def on_sales_invoice_cancel(doc, method):
 
 def on_delivery_note_cancel(doc, method):
 	"""Cancel DN: normal → TransferCancel. Return → Transfer."""
-	settings = frappe.get_single("RSD Settings")
-	if not settings.enabled:
+	branch = _resolve_branch(doc)
+	settings = _get_branch_settings(branch)
+	if not settings:
+		_skip_rsd(doc, f"no enabled RSD Settings for branch '{branch}'" if branch else "no branch resolvable")
 		return
 
 	customer_gln = frappe.db.get_value("Customer", doc.customer, "custom_gln")
@@ -1263,6 +1464,7 @@ def on_delivery_note_cancel(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferService", operation="TransferServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": products}},
 					reference_doctype="Delivery Note", reference_name=doc.name)
@@ -1272,6 +1474,7 @@ def on_delivery_note_cancel(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferBatchService", operation="TransferBatchServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": [product]}},
 					reference_doctype="Delivery Note", reference_name=doc.name)
@@ -1279,6 +1482,7 @@ def on_delivery_note_cancel(doc, method):
 			if item.serial_no:
 				products = _build_product_entries(item, gtin)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelService", operation="TransferCancelServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": products}},
 					reference_doctype="Delivery Note", reference_name=doc.name)
@@ -1288,6 +1492,7 @@ def on_delivery_note_cancel(doc, method):
 				if expiry:
 					product["XD"] = str(expiry)
 				_enqueue_rsd_notification(
+					branch=branch,
 					service_name="TransferCancelBatchService", operation="TransferCancelBatchServiceRequest",
 					params={"TOGLN": customer_gln, "PRODUCTLIST": {"PRODUCT": [product]}},
 					reference_doctype="Delivery Note", reference_name=doc.name)

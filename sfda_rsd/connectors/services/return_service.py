@@ -1,24 +1,11 @@
 # sfda_rsd/connectors/services/return_service.py
-"""SFDA DTTS Return services.
-
-Service URLs (per DTTS-ISD.RETURN-1.0.2):
-  Return:      {base}/ws/ReturnService/ReturnService?wsdl
-  ReturnBatch: {base}/ws/ReturnBatchService/ReturnBatchService?wsdl
-"""
+"""SFDA DTTS Return services."""
 from sfda_rsd.connectors.rsd_connector import RSDConnector
 
 
-def return_product(gtin, serial_number, receiver_gln, batch_number=None, expiry_date=None):
-	"""Return a product to the sender stakeholder.
-
-	Args:
-		gtin: Global Trade Item Number
-		serial_number: Serial Number
-		receiver_gln: GLN of the entity to return to (TOGLN)
-		batch_number: Optional batch number
-		expiry_date: Optional expiry date
-	"""
-	connector = RSDConnector()
+def return_product(branch, gtin, serial_number, receiver_gln, batch_number=None, expiry_date=None):
+	"""Return a product to the sender stakeholder."""
+	connector = RSDConnector(branch=branch)
 	product = {"GTIN": gtin, "SN": serial_number}
 	if batch_number:
 		product["BN"] = batch_number
@@ -32,9 +19,9 @@ def return_product(gtin, serial_number, receiver_gln, batch_number=None, expiry_
 	)
 
 
-def return_by_batch(gtin, batch_number, receiver_gln, quantity, expiry_date=None):
+def return_by_batch(branch, gtin, batch_number, receiver_gln, quantity, expiry_date=None):
 	"""Return products by batch number."""
-	connector = RSDConnector()
+	connector = RSDConnector(branch=branch)
 	product = {"GTIN": gtin, "BN": batch_number, "QUANTITY": int(quantity)}
 	if expiry_date:
 		product["XD"] = expiry_date

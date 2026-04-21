@@ -5,6 +5,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "branch",
   "service_name",
   "operation",
   "status",
@@ -16,6 +17,14 @@
   "response_xml"
  ],
  "fields": [
+  {
+   "fieldname": "branch",
+   "fieldtype": "Link",
+   "options": "Branch",
+   "label": "Branch",
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
   {
    "fieldname": "service_name",
    "fieldtype": "Data",
@@ -71,7 +80,7 @@
   }
  ],
  "links": [],
- "modified": "2026-02-18 00:00:00.000000",
+ "modified": "2026-04-20 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "SFDA RSD",
  "name": "RSD Transaction Log",

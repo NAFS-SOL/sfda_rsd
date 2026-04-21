@@ -3,11 +3,12 @@
 
 frappe.ui.form.on("RSD Settings", {
 	refresh(frm) {
-		if (frm.doc.enabled) {
+		if (frm.doc.enabled && frm.doc.branch) {
 			frm.add_custom_button(__("Test Connection"), function () {
 				frappe.call({
 					method:
 						"sfda_rsd.sfda_rsd.doctype.rsd_settings.rsd_settings.test_rsd_connection",
+					args: { branch: frm.doc.branch },
 					freeze: true,
 					freeze_message: __("Testing connection to SFDA..."),
 					callback: function (r) {
@@ -32,6 +33,9 @@ frappe.ui.form.on("RSD Settings", {
 
 function show_test_results(results) {
 	let html = `<div style="padding: 10px;">`;
+	if (results.branch) {
+		html += `<p><strong>Branch:</strong> ${results.branch}</p>`;
+	}
 	html += `<p><strong>Environment:</strong> ${results.environment}</p>`;
 	html += `<p><strong>Base URL:</strong> ${results.base_url}</p>`;
 
